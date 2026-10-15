@@ -1,0 +1,14 @@
+{
+  "name": "hr-base",
+  "private": true,
+  "scripts": {
+    "db:local": "wrangler d1 execute hr-base --local --file=schema.sql",
+    "db:remote": "wrangler d1 execute hr-base --remote --file=schema.sql",
+    "dev": "wrangler dev",
+    "test": "node test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.0"
+  }
+}

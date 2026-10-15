@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HR Base</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1d2433; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --warn:#b45309; --ok:#15803d; --bad:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); display:flex; min-height:100vh; }
+  nav { width:210px; background:#111827; color:#d1d5db; padding:16px 0; flex-shrink:0; }
+  nav b { display:block; padding:0 20px 16px; color:#fff; font-size:17px; }
+  nav a { display:block; padding:9px 20px; color:inherit; text-decoration:none; }
+  nav a.on, nav a:hover { background:#1f2937; color:#fff; }
+  nav small { display:block; padding:16px 20px 0; color:#9ca3af; word-break:break-all; }
+  main { flex:1; padding:24px; min-width:0; }
+  h1 { margin:0 0 16px; font-size:20px; }
+  .bar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  input, select, textarea { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:#fff; width:100%; }
+  .bar input { max-width:280px; }
+  button { font:inherit; padding:7px 14px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; }
+  button.p { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { background:#f9fafb; font-weight:600; color:var(--muted); font-size:12px; text-transform:uppercase; }
+  tr:hover td { background:#f9fafb; }
+  td .act { display:flex; gap:6px; }
+  td .act button { padding:3px 9px; font-size:12px; }
+  .tag { padding:2px 8px; border-radius:99px; font-size:12px; background:#eef2ff; }
+  .tag.pending, .tag.probation { background:#fef3c7; color:var(--warn); }
+  .tag.approved, .tag.active { background:#dcfce7; color:var(--ok); }
+  .tag.rejected, .tag.resigned { background:#fee2e2; color:var(--bad); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
+  .kpis .card { padding:16px; } .kpis b { display:block; font-size:28px; }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .grid2 h3 { margin:0; padding:12px; font-size:14px; border-bottom:1px solid var(--line); }
+  .tree ul { list-style:none; padding-left:22px; border-left:1px dashed var(--line); margin:4px 0; }
+  .tree > ul { border:0; padding:12px; }
+  .tree li { padding:4px 0; } .tree span { color:var(--muted); }
+  dialog { border:0; border-radius:10px; padding:0; width:min(560px,94vw); }
+  dialog form { padding:20px; display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; }
+  dialog h2 { grid-column:1/-1; margin:0 0 4px; font-size:17px; }
+  dialog label { font-size:12px; color:var(--muted); } dialog label.w { grid-column:1/-1; }
+  dialog .btns { grid-column:1/-1; display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+  .err { color:var(--bad); grid-column:1/-1; }
+  @media (max-width:720px) { body { display:block; } nav { width:auto; display:flex; overflow-x:auto; padding:0; } nav b, nav small { display:none; } main { padding:16px; } dialog form { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<nav id="nav"><b>HR Base</b></nav>
+<main id="main"></main>
+<dialog id="dlg"><form id="frm" method="dialog"></form></dialog>
+<script>
+const STATUS = { probation: 'Thử việc', active: 'Chính thức', resigned: 'Nghỉ việc', pending: 'Chờ duyệt', approved: 'Đã duyệt', rejected: 'Từ chối' };
+
+// One config drives list + form for each module. Field: [key, label, type, options]
+const MODULES = {
+  employees: { title: 'Hồ sơ nhân sự', fields: [
+    ['code', 'Mã NV', 'text', { required: true }], ['full_name', 'Họ tên', 'text', { required: true }],
+    ['email', 'Email', 'email'], ['phone', 'Điện thoại', 'tel'], ['dob', 'Ngày sinh', 'date'],
+    ['gender', 'Giới tính', 'select', { options: ['Nam', 'Nữ', 'Khác'] }],
+    ['department_id', 'Phòng ban', 'ref:departments'], ['position', 'Chức danh', 'text'],
+    ['join_date', 'Ngày vào', 'date'], ['status', 'Trạng thái', 'select', { options: ['probation', 'active', 'resigned'], required: true }],
+    ['note', 'Ghi chú', 'textarea'] ] },
+  departments: { title: 'Phòng ban', fields: [
+    ['name', 'Tên phòng ban', 'text', { required: true }], ['parent_id', 'Trực thuộc', 'ref:departments'],
+    ['manager_id', 'Trưởng phòng', 'ref:employees'] ] },
+  contracts: { title: 'Hợp đồng lao động', fields: [
+    ['employee_id', 'Nhân viên', 'ref:employees', { required: true }],
+    ['type', 'Loại HĐ', 'select', { options: ['Thử việc', 'Xác định thời hạn', 'Không xác định thời hạn', 'Thời vụ'], required: true }],
+    ['start_date', 'Từ ngày', 'date', { required: true }], ['end_date', 'Đến ngày', 'date'],
+    ['salary', 'Lương (VNĐ)', 'number'], ['note', 'Ghi chú', 'textarea'] ] },
+  leaves: { title: 'Nghỉ phép', fields: [
+    ['employee_id', 'Nhân viên', 'ref:employees', { required: true }],
+    ['type', 'Loại nghỉ', 'select', { options: ['Phép năm', 'Nghỉ ốm', 'Thai sản', 'Việc riêng có lương', 'Không lương'], required: true }],
+    ['from_date', 'Từ ngày', 'date', { required: true }], ['to_date', 'Đến ngày', 'date', { required: true }],
+    ['days', 'Số ngày', 'number', { required: true, step: 0.5 }], ['reason', 'Lý do', 'textarea'],
+    ['status', 'Trạng thái', 'readonly'] ] },
+};
+
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const cache = {};
+
+async function call(path, opts = {}) {
+  const r = await fetch('/api/' + path, { headers: { 'content-type': 'application/json' }, ...opts });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+const load = async (t) => (cache[t] = await call(t));
+const nameOf = (t, id) => { const r = (cache[t] || []).find((x) => x.id == id); return r ? (r.full_name || r.name) : ''; };
+
+function cell(f, row) {
+  const [k, , type] = f, v = row[k];
+  if (type.startsWith('ref:')) return esc(nameOf(type.slice(4), v));
+  if (k === 'status') return `<span class="tag ${esc(v)}">${esc(STATUS[v] || v)}</span>`;
+  if (k === 'salary' && v != null) return Number(v).toLocaleString('vi-VN');
+  return esc(v);
+}
+
+async function list(t) {
+  const m = MODULES[t];
+  await Promise.all([load(t), !cache.employees && load('employees'), !cache.departments && load('departments')]);
+  const cols = m.fields.filter((f) => f[2] !== 'textarea');
+  $('#main').innerHTML = `<h1>${m.title}</h1>
+    <div class="bar"><input id="q" placeholder="Tìm kiếm..."><button class="p" id="add">+ Thêm mới</button>
+    ${t === 'departments' ? '<button id="tree">Sơ đồ tổ chức</button>' : ''}</div>
+    <div class="card"><table><thead><tr>${cols.map((f) => `<th>${f[1]}</th>`).join('')}<th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
+  const render = () => {
+    const q = $('#q').value.toLowerCase();
+    $('#rows').innerHTML = cache[t]
+      .map((row) => ({ row, html: cols.map((f) => cell(f, row)) }))
+      .filter(({ html }) => !q || html.join(' ').toLowerCase().includes(q))
+      .map(({ row, html }) => `<tr>${html.map((h) => `<td>${h}</td>`).join('')}<td><div class="act">
+        ${t === 'leaves' && row.status === 'pending' ? `<button data-a="approve" data-id="${row.id}">Duyệt</button><button data-a="reject" data-id="${row.id}">Từ chối</button>` : ''}
+        <button data-a="edit" data-id="${row.id}">Sửa</button><button data-a="del" data-id="${row.id}">Xoá</button></div></td></tr>`)
+      .join('') || `<tr><td colspan="${cols.length + 1}">Chưa có dữ liệu</td></tr>`;
+  };
+  render();
+  $('#q').oninput = render;
+  $('#add').onclick = () => form(t, {});
+  if ($('#tree')) $('#tree').onclick = orgChart;
+  $('#rows').onclick = async (e) => {
+    const { a, id } = e.target.dataset;
+    if (!a) return;
+    try {
+      if (a === 'edit') return form(t, cache[t].find((r) => r.id == id));
+      if (a === 'del' && !confirm('Xoá bản ghi này?')) return;
+      if (a === 'del') await call(`${t}/${id}`, { method: 'DELETE' });
+      else await call(`leaves/${id}/${a}`, { method: 'POST' });
+      if (t === 'employees' || t === 'departments') delete cache[t];
+      list(t);
+    } catch (err) { alert(err.message); }
+  };
+}
+
+function form(t, row) {
+  const m = MODULES[t];
+  const input = ([k, label, type, o = {}]) => {
+    const v = esc(row[k]), req = o.required ? 'required' : '';
+    let el;
+    if (type === 'readonly') el = `<input value="${esc(STATUS[row[k]] || row[k] || 'Chờ duyệt')}" disabled>`;
+    else if (type === 'textarea') el = `<textarea name="${k}" rows="2">${v}</textarea>`;
+    else if (type === 'select') el = `<select name="${k}" ${req}><option value=""></option>${o.options.map((x) => `<option value="${x}" ${row[k] == x ? 'selected' : ''}>${STATUS[x] || x}</option>`).join('')}</select>`;
+    else if (type.startsWith('ref:')) el = `<select name="${k}" ${req}><option value=""></option>${cache[type.slice(4)].filter((r) => !(t === 'departments' && k === 'parent_id' && r.id === row.id)).map((r) => `<option value="${r.id}" ${row[k] == r.id ? 'selected' : ''}>${esc(r.full_name || r.name)}</option>`).join('')}</select>`;
+    else el = `<input name="${k}" type="${type}" value="${v}" ${req} ${o.step ? `step="${o.step}"` : ''}>`;
+    return `<label class="${type === 'textarea' ? 'w' : ''}">${label}${el}</label>`;
+  };
+  $('#frm').innerHTML = `<h2>${row.id ? 'Cập nhật' : 'Thêm mới'} · ${m.title}</h2>${m.fields.map(input).join('')}
+    <div class="err" id="err"></div><div class="btns"><button value="cancel" formnovalidate>Huỷ</button><button class="p" value="ok">Lưu</button></div>`;
+  $('#frm').onsubmit = async (e) => {
+    if (e.submitter?.value !== 'ok') return;
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData($('#frm')));
+    try {
+      await call(row.id ? `${t}/${row.id}` : t, { method: row.id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      $('#dlg').close();
+      if (t === 'employees' || t === 'departments') delete cache[t];
+      list(t);
+    } catch (err) { $('#err').textContent = err.message; }
+  };
+  $('#dlg').showModal();
+}
+
+async function orgChart() {
+  await Promise.all([load('departments'), load('employees')]);
+  const active = cache.employees.filter((e) => e.status !== 'resigned');
+  const branch = (pid) => {
+    const kids = cache.departments.filter((d) => (d.parent_id ?? null) == pid);
+    return kids.length ? `<ul>${kids.map((d) => `<li><b>${esc(d.name)}</b> <span>· ${active.filter((e) => e.department_id == d.id).length} NS${d.manager_id ? ' · TP: ' + esc(nameOf('employees', d.manager_id)) : ''}</span>${branch(d.id)}</li>`).join('')}</ul>` : '';
+  };
+  $('#main').innerHTML = `<h1>Sơ đồ tổ chức</h1><div class="bar"><a href="#departments"><button>← Danh sách phòng ban</button></a></div>
+    <div class="card tree">${branch(null) || '<p style="padding:12px">Chưa có phòng ban</p>'}</div>`;
+}
+
+async function dashboard() {
+  const s = await call('stats');
+  const n = (st) => s.byStatus.find((x) => x.status === st)?.n || 0;
+  $('#main').innerHTML = `<h1>Tổng quan</h1>
+    <div class="kpis">
+      <div class="card">Headcount<b>${n('active') + n('probation')}</b></div>
+      <div class="card">Đang thử việc<b>${n('probation')}</b></div>
+      <div class="card">Đã nghỉ việc<b>${n('resigned')}</b></div>
+      <div class="card">Đơn nghỉ chờ duyệt<b>${s.pendingLeaves}</b></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>Nhân sự theo phòng ban</h3><table>${s.byDept.map((d) => `<tr><td>${esc(d.name)}</td><td>${d.n}</td></tr>`).join('') || '<tr><td>—</td></tr>'}</table></div>
+      <div class="card"><h3>HĐ hết hạn trong 30 ngày</h3><table>${s.expiring.map((c) => `<tr><td>${esc(c.full_name)}</td><td>${esc(c.type)}</td><td>${esc(c.end_date)}</td></tr>`).join('') || '<tr><td>Không có</td></tr>'}</table></div>
+    </div>`;
+}
+
+function route() {
+  const t = location.hash.slice(1) || 'dashboard';
+  document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('on', a.hash === '#' + t));
+  (t === 'dashboard' ? dashboard() : MODULES[t] ? list(t) : dashboard()).catch((e) => ($('#main').innerHTML = `<p class="err">${esc(e.message)}</p>`));
+}
+
+$('#nav').insertAdjacentHTML('beforeend',
+  [['dashboard', 'Tổng quan'], ...Object.entries(MODULES).map(([k, m]) => [k, m.title])].map(([k, l]) => `<a href="#${k}">${l}</a>`).join('') + '<small id="me"></small>');
+call('me').then((m) => ($('#me').textContent = m.email)).catch(() => {});
+addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
